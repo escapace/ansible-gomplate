@@ -18,16 +18,15 @@
     # checksum: "sha512:{{ gomplate_url_binary_checksum }}"
     owner: root
     group: root
-    mode: 755
+    mode: 0755
     setype: bin_t
     seuser: system_u
-  changed_when: false
 
-- name: link aws cli
+- name: link gomplate
   ansible.builtin.file:
     src: "/opt/gomplate/bin/gomplate"
     dest: /usr/bin/gomplate
-    mode: 755
+    mode: 0755
     owner: root
     group: root
     state: link
