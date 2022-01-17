@@ -2,15 +2,3 @@
 # defaults file for escapace.gomplate
 
 gomplate_version: 3.10.0
-
-gomplate_architecture_map:
-  amd64: amd64
-  x86_64: amd64
-  aarch64: arm64
-  64-bit: amd64
-
-gomplate_architecture: "{{ gomplate_architecture_map[ansible_architecture] }}"
-gomplate_binary: "gomplate_linux-{{ gomplate_architecture }}"
-
-gomplate_url_binary: "https://github.com/hairyhenderson/gomplate/releases/download/v{{ gomplate_version }}/{{ gomplate_binary }}"
-gomplate_url_binary_checksum: "https://github.com/hairyhenderson/gomplate/releases/download/v{{ gomplate_version }}/checksums-v{{ gomplate_version }}_sha512.txt"
