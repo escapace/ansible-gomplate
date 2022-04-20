@@ -1,7 +1,7 @@
 ---
 
 - name: create gomplate directories
-  file:
+  ansible.builtin.file:
     owner: root
     group: root
     path: "{{ item }}"
@@ -12,7 +12,7 @@
     - "/opt/gomplate/bin"
 
 - name: download gomplate
-  get_url:
+  ansible.builtin.get_url:
     url: "{{ gomplate_url_binary }}"
     dest: "/opt/gomplate/bin/gomplate"
     # checksum: "sha512:{{ gomplate_url_binary_checksum }}"
