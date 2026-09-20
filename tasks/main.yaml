@@ -1,5 +1,6 @@
 ---
-# tasks file for escapace.cni
+# tasks file for escapace.gomplate
 
-- ansible.builtin.include_tasks: gomplate.yaml
-  when: ansible_os_family == "RedHat"
+- name: include gomplate installation tasks
+  ansible.builtin.include_tasks: gomplate.yaml
+  when: ansible_facts["os_family"] == "RedHat"

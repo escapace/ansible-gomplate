@@ -10,11 +10,59 @@
     - /opt/gomplate
     - /opt/gomplate/bin
 
+- name: use the embedded gomplate checksum
+  ansible.builtin.set_fact:
+    gomplate_resolved_checksum: "{{ gomplate_embedded_checksum }}"
+  when: gomplate_embedded_checksum | length > 0
+
+- name: retrieve gomplate release checksums
+  ansible.builtin.uri:
+    url: "{{ gomplate_checksum_manifest_url }}"
+    return_content: true
+  when: gomplate_embedded_checksum | length == 0
+  register: gomplate_checksum_manifest
+
+- name: select gomplate release checksums
+  ansible.builtin.set_fact:
+    gomplate_release_checksums: >-
+      {{
+        gomplate_checksum_manifest.content
+        | regex_findall(
+            '(?m)^([0-9a-fA-F]{64}) +[*]?bin/'
+            ~ gomplate_binary
+            ~ '$'
+          )
+      }}
+  when: gomplate_embedded_checksum | length == 0
+
+- name: validate gomplate release checksums
+  ansible.builtin.assert:
+    that:
+      - gomplate_release_checksums | length == 1
+    fail_msg: >-
+      The gomplate {{ gomplate_version }} release does not provide exactly one
+      SHA-256 checksum for {{ gomplate_binary }}.
+    quiet: true
+  when: gomplate_embedded_checksum | length == 0
+
+- name: resolve the gomplate checksum
+  ansible.builtin.set_fact:
+    gomplate_resolved_checksum: "{{ gomplate_release_checksums | first }}"
+  when: gomplate_embedded_checksum | length == 0
+
+- name: validate the gomplate checksum
+  ansible.builtin.assert:
+    that:
+      - gomplate_resolved_checksum is match('^[0-9a-fA-F]{64}$')
+    fail_msg: >-
+      The resolved gomplate {{ gomplate_version }} checksum is invalid.
+    quiet: true
+
 - name: download gomplate
   ansible.builtin.get_url:
     url: "{{ gomplate_url_binary }}"
     dest: /opt/gomplate/bin/gomplate
-    # checksum: "sha512:{{ gomplate_url_binary_checksum }}"
+    checksum: sha256:{{ gomplate_resolved_checksum }}
     owner: root
     group: root
     mode: "0755"
