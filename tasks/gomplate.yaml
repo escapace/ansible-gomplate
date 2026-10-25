@@ -1,73 +1,75 @@
 ---
-- name: create gomplate directories
-  ansible.builtin.file:
-    owner: root
-    group: root
-    path: "{{ item }}"
-    state: directory
-    mode: "0755"
-  with_items:
-    - /opt/gomplate
-    - /opt/gomplate/bin
+- name: validate gomplate inputs
+  ansible.builtin.assert:
+    that:
+      - gomplate_version is string
+      - gomplate_version == 'latest' or gomplate_version is match('^' ~ gomplate_semver_pattern ~ '$')
+      - gomplate_checksum is string
+      - gomplate_checksum == '' or gomplate_checksum is match('^[0-9a-fA-F]{64}$')
+      - gomplate_checksums is mapping
+      - ansible_facts['architecture'] in gomplate_architecture_map
+    fail_msg: >-
+      Set gomplate_version to latest or an exact SemVer without a v prefix,
+      and gomplate_checksum to an empty string or 64 hexadecimal SHA-256 characters.
+      Only amd64 and arm64 architectures are supported.
+    quiet: true
 
-- name: use the embedded gomplate checksum
+- name: retrieve the latest gomplate release
+  ansible.builtin.include_tasks: release.yaml
+  when: gomplate_version == 'latest'
+
+- name: resolve the gomplate version
   ansible.builtin.set_fact:
-    gomplate_resolved_checksum: "{{ gomplate_embedded_checksum }}"
-  when: gomplate_embedded_checksum | length > 0
-
-- name: retrieve gomplate release checksums
-  ansible.builtin.uri:
-    url: "{{ gomplate_checksum_manifest_url }}"
-    return_content: true
-  when: gomplate_embedded_checksum | length == 0
-  register: gomplate_checksum_manifest
-
-- name: select gomplate release checksums
-  ansible.builtin.set_fact:
-    gomplate_release_checksums: >-
+    gomplate_resolved_version: >-
       {{
-        gomplate_checksum_manifest.content
-        | regex_findall(
-            '(?m)^([0-9a-fA-F]{64}) +[*]?bin/'
-            ~ gomplate_binary
-            ~ '$'
-          )
+        gomplate_release.json.tag_name[1:]
+        if gomplate_version == 'latest'
+        else gomplate_version
       }}
-  when: gomplate_embedded_checksum | length == 0
 
-- name: validate gomplate release checksums
+- name: inspect the gomplate binary
+  ansible.builtin.stat:
+    path: /opt/gomplate/bin/gomplate
+    get_checksum: false
+  register: gomplate_binary_stat
+
+- name: read the installed gomplate version
+  ansible.builtin.command:
+    argv:
+      - /opt/gomplate/bin/gomplate
+      - --version
+  register: gomplate_installed
+  changed_when: false
+  check_mode: false
+  when: gomplate_binary_stat.stat.exists
+
+- name: validate the installed gomplate version
   ansible.builtin.assert:
     that:
-      - gomplate_release_checksums | length == 1
-    fail_msg: >-
-      The gomplate {{ gomplate_version }} release does not provide exactly one
-      SHA-256 checksum for {{ gomplate_binary }}.
+      - gomplate_installed.stdout is match('^gomplate version ' ~ gomplate_semver_pattern ~ '$')
+    fail_msg: "Unrecognized gomplate version output: {{ gomplate_installed.stdout }}"
     quiet: true
-  when: gomplate_embedded_checksum | length == 0
+  when: gomplate_binary_stat.stat.exists
 
-- name: resolve the gomplate checksum
+- name: determine whether gomplate needs installation
   ansible.builtin.set_fact:
-    gomplate_resolved_checksum: "{{ gomplate_release_checksums | first }}"
-  when: gomplate_embedded_checksum | length == 0
+    gomplate_install_required: >-
+      {{
+        not gomplate_binary_stat.stat.exists
+        or (
+          gomplate_version == 'latest'
+          and gomplate_installed.stdout.split()[-1]
+              is ansible.builtin.version(gomplate_resolved_version, '<', version_type='semver')
+        )
+        or (
+          gomplate_version != 'latest'
+          and gomplate_installed.stdout.split()[-1] != gomplate_resolved_version
+        )
+      }}
 
-- name: validate the gomplate checksum
-  ansible.builtin.assert:
-    that:
-      - gomplate_resolved_checksum is match('^[0-9a-fA-F]{64}$')
-    fail_msg: >-
-      The resolved gomplate {{ gomplate_version }} checksum is invalid.
-    quiet: true
-
-- name: download gomplate
-  ansible.builtin.get_url:
-    url: "{{ gomplate_url_binary }}"
-    dest: /opt/gomplate/bin/gomplate
-    checksum: sha256:{{ gomplate_resolved_checksum }}
-    owner: root
-    group: root
-    mode: "0755"
-    setype: bin_t
-    seuser: system_u
+- name: install the selected gomplate release
+  ansible.builtin.include_tasks: install.yaml
+  when: gomplate_install_required
 
 - name: link gomplate
   ansible.builtin.file:
@@ -77,3 +79,4 @@
     owner: root
     group: root
     state: link
+  when: not ansible_check_mode or gomplate_binary_stat.stat.exists

@@ -1,0 +1,164 @@
+---
+- name: verify
+  hosts: all
+  vars_files:
+    - "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yaml"
+    - "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/main.yaml"
+  tasks:
+    - name: reapply the latest release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+
+    - name: inspect the installed latest release
+      ansible.builtin.command: /usr/bin/gomplate --version
+      register: gomplate_test_latest
+      changed_when: false
+
+    - name: validate the latest release and semver ordering
+      ansible.builtin.assert:
+        that:
+          - not gomplate_install_required
+          - gomplate_test_latest.stdout == 'gomplate version ' ~ gomplate_resolved_version
+          - "'5.10.0' is ansible.builtin.version('5.9.0', '>', version_type='semver')"
+          - "'5.3.1-rc.1' is ansible.builtin.version('5.3.1', '<', version_type='semver')"
+
+    - name: install an embedded pinned release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "5.2.0"
+
+    - name: verify the embedded pinned binary
+      ansible.builtin.stat:
+        path: /opt/gomplate/bin/gomplate
+        checksum_algorithm: sha256
+      register: gomplate_test_binary
+
+    - name: validate the embedded pin
+      ansible.builtin.assert:
+        that:
+          - gomplate_test_binary.stat.checksum == gomplate_checksums['5.2.0'][gomplate_architecture]
+
+    - name: reset release metadata before testing a current pin
+      ansible.builtin.set_fact:
+        gomplate_release: {}
+
+    - name: reapply the embedded pinned release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "5.2.0"
+
+    - name: verify a current pin skips installation and metadata lookup
+      ansible.builtin.assert:
+        that:
+          - not gomplate_install_required
+          - gomplate_release == {}
+
+    - name: install a release absent from the embedded pins
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "4.3.3"
+
+    - name: save the upstream checksum for manifest and override tests
+      ansible.builtin.set_fact:
+        gomplate_test_checksum: "{{ gomplate_resolved_checksum }}"
+        gomplate_release: {}
+
+    - name: reapply the non-embedded pinned release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "4.3.3"
+
+    - name: verify a non-embedded current pin skips installation and metadata lookup
+      ansible.builtin.assert:
+        that:
+          - not gomplate_install_required
+          - gomplate_release == {}
+
+    - name: supply release metadata without an asset digest
+      ansible.builtin.set_fact:
+        gomplate_release:
+          json:
+            assets:
+              - name: "{{ gomplate_binary }}"
+                digest: null
+        gomplate_resolved_version: "4.3.3"
+
+    - name: exercise the legacy checksum manifest fallback
+      ansible.builtin.include_tasks: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/tasks/install.yaml"
+
+    - name: verify the manifest checksum matches the upstream asset digest
+      ansible.builtin.assert:
+        that:
+          - gomplate_resolved_checksum == gomplate_test_checksum
+          - gomplate_release_checksums | length == 1
+
+    - name: upgrade from a pin to the latest release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+
+    - name: reset release metadata before testing a checksum override
+      ansible.builtin.set_fact:
+        gomplate_release: {}
+
+    - name: downgrade with an explicit checksum override
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "4.3.3"
+        gomplate_checksum: "{{ gomplate_test_checksum }}"
+
+    - name: verify the override skipped metadata lookup
+      ansible.builtin.assert:
+        that:
+          - gomplate_resolved_checksum == gomplate_test_checksum
+          - gomplate_release == {}
+
+    - name: restore the latest release
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+
+    - name: simulate an installed version newer than the latest release
+      ansible.builtin.copy:
+        dest: /opt/gomplate/bin/gomplate
+        content: "#!/bin/sh\nprintf 'gomplate version 9999.0.0\\n'\n"
+        mode: "0755"
+
+    - name: apply latest without downgrading a newer version
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+
+    - name: verify latest did not downgrade
+      ansible.builtin.assert:
+        that:
+          - not gomplate_install_required
+
+    - name: restore the real binary with an exact version
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        gomplate_version: "{{ gomplate_test_latest.stdout.split()[-1] }}"
+
+    - name: reject a malformed version
+      block:
+        - name: apply an invalid version
+          ansible.builtin.include_role:
+            name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+          vars:
+            gomplate_version: "5.02.0"
+      rescue:
+        - name: verify input validation rejected the version
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'validate gomplate inputs'
+        - name: record the expected rejection
+          ansible.builtin.set_fact:
+            gomplate_test_invalid_rejected: true
+
+    - name: verify invalid input failed explicitly
+      ansible.builtin.assert:
+        that:
+          - gomplate_test_invalid_rejected | default(false)

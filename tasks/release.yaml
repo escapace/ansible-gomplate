@@ -1,0 +1,25 @@
+---
+- name: retrieve gomplate release metadata
+  ansible.builtin.include_role:
+    name: escapace.utilities.github_request
+    allow_duplicates: true
+    public: false
+  vars:
+    github_request_url: "{{ gomplate_release_api_url }}"
+    github_request_result_var: gomplate_release
+
+- name: validate gomplate release metadata
+  ansible.builtin.assert:
+    that:
+      - gomplate_release.get('json', {}) is mapping
+      - gomplate_release.get('json', {}).get('tag_name', '') is match('^v' ~ gomplate_semver_pattern ~ '$')
+      - gomplate_release.json.get('draft') == false
+      - >-
+        (gomplate_version == 'latest' and gomplate_release.json.get('prerelease') == false)
+        or gomplate_release.json.get('tag_name') == 'v' ~ gomplate_version
+      - gomplate_release.json.get('assets') is sequence
+      - gomplate_release.json.get('assets') is not string
+      - gomplate_release.json.get('assets') is not mapping
+    fail_msg: >-
+      Invalid gomplate {{ gomplate_version }} release metadata for {{ gomplate_binary }}.
+    quiet: true

@@ -1,7 +1,7 @@
 ---
 # defaults file for escapace.gomplate
 
-gomplate_version: 5.2.0
+gomplate_version: latest
 
 # Set this to a SHA-256 value to override embedded and release metadata.
 gomplate_checksum: ""

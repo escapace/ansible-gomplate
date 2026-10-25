@@ -1,0 +1,149 @@
+---
+- name: validate gomplate embedded checksums
+  ansible.builtin.assert:
+    that:
+      - gomplate_checksums.get(gomplate_resolved_version, {}) is mapping
+    fail_msg: "Invalid checksum table for gomplate {{ gomplate_resolved_version }}."
+    quiet: true
+
+- name: select the gomplate checksum override or embedded pin
+  ansible.builtin.set_fact:
+    gomplate_resolved_checksum: "{{ gomplate_embedded_checksum }}"
+
+- name: validate the selected gomplate checksum type
+  ansible.builtin.assert:
+    that:
+      - gomplate_resolved_checksum is string
+    fail_msg: "The checksum for gomplate {{ gomplate_resolved_version }} {{ gomplate_binary }} must be a string."
+    quiet: true
+
+- name: retrieve checksums from gomplate release metadata
+  when: gomplate_resolved_checksum | length == 0
+  block:
+    - name: retrieve the pinned gomplate release
+      ansible.builtin.include_tasks: release.yaml
+      when: gomplate_version != 'latest'
+
+    - name: validate gomplate release asset records
+      ansible.builtin.assert:
+        that:
+          - item is mapping
+          - item.get('name') is string
+        fail_msg: "Invalid asset record for gomplate {{ gomplate_resolved_version }}."
+        quiet: true
+      loop: "{{ gomplate_release.json.assets }}"
+      loop_control:
+        label: "{{ item.get('name', '') if item is mapping else 'invalid asset' }}"
+
+    - name: select the exact gomplate release asset
+      ansible.builtin.set_fact:
+        gomplate_release_assets: >-
+          {{
+            gomplate_release.json.assets
+            | selectattr('name', 'equalto', gomplate_binary)
+            | list
+          }}
+
+    - name: validate the gomplate release asset
+      ansible.builtin.assert:
+        that:
+          - gomplate_release_assets | length == 1
+        fail_msg: >-
+          The gomplate {{ gomplate_resolved_version }} release does not provide
+          exactly one {{ gomplate_binary }} asset.
+        quiet: true
+
+    - name: validate the gomplate release asset digest
+      ansible.builtin.assert:
+        that:
+          - >-
+            gomplate_release_assets[0].get('digest') is none
+            or gomplate_release_assets[0].get('digest') is match('^sha256:[0-9a-fA-F]{64}$')
+        fail_msg: >-
+          Invalid SHA-256 digest for gomplate {{ gomplate_resolved_version }} {{ gomplate_binary }}.
+        quiet: true
+
+    - name: use the gomplate release asset digest
+      ansible.builtin.set_fact:
+        gomplate_resolved_checksum: "{{ gomplate_release_assets[0].digest[7:] }}"
+      when: gomplate_release_assets[0].get('digest') is not none
+
+    - name: resolve a legacy gomplate checksum manifest
+      when: gomplate_release_assets[0].get('digest') is none
+      block:
+        - name: retrieve gomplate release checksums
+          ansible.builtin.include_role:
+            name: escapace.utilities.github_request
+            allow_duplicates: true
+            public: false
+          vars:
+            github_request_url: "{{ gomplate_checksum_manifest_url }}"
+            github_request_return_content: true
+            github_request_result_var: gomplate_checksum_manifest
+
+        - name: select gomplate release checksums
+          ansible.builtin.set_fact:
+            gomplate_release_checksums: >-
+              {{
+                gomplate_checksum_manifest.content
+                | regex_findall(
+                    '(?m)^([0-9a-fA-F]{64}) +[*]?bin/'
+                    ~ (gomplate_binary | ansible.builtin.regex_escape)
+                    ~ '\r?$'
+                  )
+              }}
+
+        - name: validate gomplate release checksums
+          ansible.builtin.assert:
+            that:
+              - gomplate_release_checksums | length == 1
+            fail_msg: >-
+              The gomplate {{ gomplate_resolved_version }} release does not provide
+              exactly one SHA-256 checksum for {{ gomplate_binary }}.
+            quiet: true
+
+        - name: resolve the gomplate checksum
+          ansible.builtin.set_fact:
+            gomplate_resolved_checksum: "{{ gomplate_release_checksums | first }}"
+
+- name: validate the gomplate checksum
+  ansible.builtin.assert:
+    that:
+      - gomplate_resolved_checksum is string
+      - gomplate_resolved_checksum is match('^[0-9a-fA-F]{64}$')
+    fail_msg: >-
+      The resolved gomplate {{ gomplate_resolved_version }} checksum for {{ gomplate_binary }} is invalid.
+    quiet: true
+
+- name: create gomplate directories
+  ansible.builtin.file:
+    owner: root
+    group: root
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/gomplate
+    - /opt/gomplate/bin
+
+- name: download gomplate
+  ansible.builtin.include_role:
+    name: escapace.utilities.github_download
+    allow_duplicates: true
+    public: false
+  vars:
+    github_download_url: "{{ gomplate_url_binary }}"
+    github_download_dest: /opt/gomplate/bin/gomplate
+    github_download_checksum: sha256:{{ gomplate_resolved_checksum }}
+    github_download_owner: root
+    github_download_group: root
+    github_download_mode: "0755"
+    github_download_result_var: gomplate_download
+  when: not ansible_check_mode
+
+- name: label the gomplate binary
+  ansible.builtin.file:
+    path: /opt/gomplate/bin/gomplate
+    setype: bin_t
+    seuser: system_u
+  when: not ansible_check_mode

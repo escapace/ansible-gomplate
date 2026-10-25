@@ -1,5 +1,10 @@
 ---
 
+# Installed collections own their lint policy and namespace tests. Renaming their
+# collection-scoped state here would change the dependency's isolation contract.
+exclude_paths:
+  - .ansible/collections/
+
 skip_list:
   - command-instead-of-shell
   - experimental
