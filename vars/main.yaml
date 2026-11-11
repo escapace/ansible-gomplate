@@ -1,25 +1,20 @@
 ---
+gomplate_architecture: "{{ gomplate_architecture_map[ansible_facts['architecture']] }}"
 # vars file for escapace.gomplate
 
 gomplate_architecture_map:
-  amd64: amd64
-  x86_64: amd64
-  aarch64: arm64
-  arm64: arm64
   64-bit: amd64
 
-gomplate_architecture: "{{ gomplate_architecture_map[ansible_facts['architecture']] }}"
+  aarch64: arm64
+  amd64: amd64
+  arm64: arm64
+  x86_64: amd64
 gomplate_binary: gomplate_linux-{{ gomplate_architecture }}
 
 # SemVer 2.0.0, including the no-leading-zero rule for numeric identifiers.
 gomplate_semver_pattern: >-
   (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?
 
-gomplate_release_api_url: >-
-  https://api.github.com/repos/hairyhenderson/gomplate/releases/{{
-    'latest' if gomplate_version == 'latest' else 'tags/v' ~ gomplate_version
-  }}
-gomplate_url_binary: https://github.com/hairyhenderson/gomplate/releases/download/v{{ gomplate_resolved_version }}/{{ gomplate_binary }}
 gomplate_checksum_manifest_url: https://github.com/hairyhenderson/gomplate/releases/download/v{{ gomplate_resolved_version }}/checksums-v{{ gomplate_resolved_version }}_sha256.txt
 gomplate_embedded_checksum: >-
   {{
@@ -27,3 +22,8 @@ gomplate_embedded_checksum: >-
     if gomplate_checksum | length > 0
     else gomplate_checksums.get(gomplate_resolved_version, {}).get(gomplate_architecture, '')
   }}
+gomplate_release_api_url: >-
+  https://api.github.com/repos/hairyhenderson/gomplate/releases/{{
+    'latest' if gomplate_version == 'latest' else 'tags/v' ~ gomplate_version
+  }}
+gomplate_url_binary: https://github.com/hairyhenderson/gomplate/releases/download/v{{ gomplate_resolved_version }}/{{ gomplate_binary }}
